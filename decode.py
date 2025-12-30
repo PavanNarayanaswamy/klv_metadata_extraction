@@ -7,10 +7,10 @@ import json
 # JVM + JARs
 # -------------------------------------------------
 JARS = [
-    "jmisb-api-1.12.0.jar",
-    "jmisb-core-common-1.12.0.jar",
-    "slf4j-api-1.7.36.jar",
-    "slf4j-simple-1.7.36.jar",
+    "jars/jmisb-api-1.12.0.jar",
+    "jars/jmisb-core-common-1.12.0.jar",
+    "jars/slf4j-api-1.7.36.jar",
+    "jars/slf4j-simple-1.7.36.jar",
 ]
 
 jpype.startJVM(classpath=JARS)
@@ -80,7 +80,8 @@ def decode_ontologies(oseries):
 # -------------------------------------------------
 # Parse KLV
 # -------------------------------------------------
-data = open("/home/saisri/test_pipeline/output/metadata_emb_2.klv", "rb").read()
+# data = open("output/metadata_emb.klv", "rb").read()
+data = open("output/metadata.klv", "rb").read()
 byte_array = jpype.JArray(JByte)(data)
 packets = KlvParser.parseBytes(byte_array)
 
@@ -149,7 +150,9 @@ for i in range(packets.size()):
 # -------------------------------------------------
 # Write JSON
 # -------------------------------------------------
-with open("output/embedded_decoded_1.json", "w") as f:
+# with open("output/embedded_decoded.json", "w") as f:
+#     json.dump(result, f, indent=2)
+with open("output/standalone_decoded.json", "w") as f:
     json.dump(result, f, indent=2)
 
 jpype.shutdownJVM()
