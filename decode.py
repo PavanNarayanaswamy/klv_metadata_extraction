@@ -1,160 +1,164 @@
+# decode.py
 import jpype
 import jpype.imports
 from jpype.types import JByte
-import json
-
-# -------------------------------------------------
-# JVM + JARs
-# -------------------------------------------------
-JARS = [
-    "jars/jmisb-api-1.12.0.jar",
-    "jars/jmisb-core-common-1.12.0.jar",
-    "jars/slf4j-api-1.7.36.jar",
-    "jars/slf4j-simple-1.7.36.jar",
-]
-
-jpype.startJVM(classpath=JARS)
-
-from org.jmisb.api.klv import KlvParser
-from org.jmisb.api.klv.st0903 import VmtiLocalSet, VmtiMetadataKey
-from org.jmisb.api.klv.st0601 import UasDatalinkMessage, UasDatalinkTag
-from org.jmisb.api.klv.st0601 import NestedVmtiLocalSet
-
-# -------------------------------------------------
-# Helpers
-# -------------------------------------------------
-def safe_value(v):
-    """Convert Java / JPype values into JSON-safe Python values"""
-    if v is None:
-        return None
-    return str(v)
 
 
-def decode_fields(ls):
-    out = {}
-    for key in ls.getIdentifiers():
-        val = ls.getField(key)
-        if val:
-            out[str(key)] = safe_value(val.getDisplayableValue())
-    return out
+class JmisbDecoder:
+    def __init__(self, jars):
+        self.jars = jars
+        self._java_loaded = False
 
+    # ---------------- JVM ----------------
+    def start_jvm(self):
+        if not jpype.isJVMStarted():
+            jpype.startJVM(classpath=self.jars)
 
-def decode_vtargets(vseries):
-    targets_out = []
-    for tgt in vseries.getVTargets():
-        tdata = {
-            "target_id": int(tgt.getTargetIdentifier()),
-            "fields": {}
-        }
-        for k in tgt.getIdentifiers():
-            v = tgt.getField(k)
-            if v:
-                tdata["fields"][str(k)] = safe_value(v.getDisplayableValue())
-        targets_out.append(tdata)
-    return targets_out
+        # Import Java classes ONLY after JVM starts
+        if not self._java_loaded:
+            self._load_java_classes()
+            self._java_loaded = True
 
+    def shutdown_jvm(self):
+        if jpype.isJVMStarted():
+            jpype.shutdownJVM()
 
-def decode_algorithms(aseries):
-    algos_out = []
-    for algo in aseries.getAlgorithms():
-        adata = {}
-        for k in algo.getIdentifiers():
-            v = algo.getField(k)
-            if v:
-                adata[str(k)] = safe_value(v.getDisplayableValue())
-        algos_out.append(adata)
-    return algos_out
+    def _load_java_classes(self):
+        # Delayed Java imports (CRITICAL)
+        from org.jmisb.api.klv import KlvParser
+        from org.jmisb.api.klv.st0903 import VmtiLocalSet, VmtiMetadataKey
+        from org.jmisb.api.klv.st0601 import UasDatalinkMessage, UasDatalinkTag, NestedVmtiLocalSet
 
+        self.KlvParser = KlvParser
+        self.VmtiLocalSet = VmtiLocalSet
+        self.VmtiMetadataKey = VmtiMetadataKey
+        self.UasDatalinkMessage = UasDatalinkMessage
+        self.NestedVmtiLocalSet = NestedVmtiLocalSet
+        self.UasDatalinkTag = UasDatalinkTag 
 
-def decode_ontologies(oseries):
-    onts_out = []
-    for ont in oseries.getOntologies():
-        odata = {}
-        for k in ont.getIdentifiers():
-            v = ont.getField(k)
-            if v:
-                odata[str(k)] = safe_value(v.getDisplayableValue())
-        onts_out.append(odata)
-    return onts_out
+    # ---------------- Helpers ----------------
+    @staticmethod
+    def safe_value(v):
+        return None if v is None else str(v)
 
-# -------------------------------------------------
-# Parse KLV
-# -------------------------------------------------
-# data = open("output/metadata_emb.klv", "rb").read()
-data = open("output/metadata.klv", "rb").read()
-byte_array = jpype.JArray(JByte)(data)
-packets = KlvParser.parseBytes(byte_array)
+    def decode_fields(self, ls):
+        out = {}
+        for key in ls.getIdentifiers():
+            val = ls.getField(key)
+            if val:
+                out[str(key)] = self.safe_value(val.getDisplayableValue())
+        return out
 
-result = {
-    "total_packets": packets.size(),
-    "packets": []
-}
-
-for i in range(packets.size()):
-    pkt = packets.get(i)
-    pkt_out = {"packet_index": i}
-
-    # ======================================================
-    # ST0903 – Standalone VMTI
-    # ======================================================
-    if isinstance(pkt, VmtiLocalSet):
-        pkt_out["type"] = "ST0903_VMTI"
-        pkt_out["fields"] = decode_fields(pkt)
-
-        vseries = pkt.getField(VmtiMetadataKey.VTargetSeries)
-        if vseries:
-            pkt_out["vtarget_series"] = decode_vtargets(vseries)
-
-        aseries = pkt.getField(VmtiMetadataKey.AlgorithmSeries)
-        if aseries:
-            pkt_out["algorithm_series"] = decode_algorithms(aseries)
-
-        oseries = pkt.getField(VmtiMetadataKey.OntologySeries)
-        if oseries:
-            pkt_out["ontology_series"] = decode_ontologies(oseries)
-
-    # ======================================================
-    # ST0601 – UAS Datalink
-    # ======================================================
-    elif isinstance(pkt, UasDatalinkMessage):
-        pkt_out["type"] = "ST0601_UAS"
-        pkt_out["fields"] = decode_fields(pkt)
-
-        raw_vmti = pkt.getField(UasDatalinkTag.VmtiLocalDataSet)
-        if isinstance(raw_vmti, NestedVmtiLocalSet):
-            vmti = raw_vmti.getVmti()
-            vmti_out = {
-                "fields": decode_fields(vmti)
+    def decode_vtargets(self, vseries):
+        targets = []
+        for tgt in vseries.getVTargets():
+            tdata = {
+                "target_id": int(tgt.getTargetIdentifier()),
+                "fields": {}
             }
+            for k in tgt.getIdentifiers():
+                v = tgt.getField(k)
+                if v:
+                    tdata["fields"][str(k)] = self.safe_value(v.getDisplayableValue())
+            targets.append(tdata)
+        return targets
 
-            vseries = vmti.getField(VmtiMetadataKey.VTargetSeries)
+    def decode_algorithms(self, aseries):
+        algos = []
+        for algo in aseries.getAlgorithms():
+            adata = {}
+            for k in algo.getIdentifiers():
+                v = algo.getField(k)
+                if v:
+                    adata[str(k)] = self.safe_value(v.getDisplayableValue())
+            algos.append(adata)
+        return algos
+
+    def decode_ontologies(self, oseries):
+        onts = []
+        for ont in oseries.getOntologies():
+            odata = {}
+            for k in ont.getIdentifiers():
+                v = ont.getField(k)
+                if v:
+                    odata[str(k)] = self.safe_value(v.getDisplayableValue())
+            onts.append(odata)
+        return onts
+
+    # ---------------- Packet Decoders ----------------
+    def decode_vmti_packet(self, pkt):
+        out = {
+            "type": "ST0903_VMTI",
+            "fields": self.decode_fields(pkt)
+        }
+
+        vseries = pkt.getField(self.VmtiMetadataKey.VTargetSeries)
+        if vseries:
+            out["vtarget_series"] = self.decode_vtargets(vseries)
+
+        aseries = pkt.getField(self.VmtiMetadataKey.AlgorithmSeries)
+        if aseries:
+            out["algorithm_series"] = self.decode_algorithms(aseries)
+
+        oseries = pkt.getField(self.VmtiMetadataKey.OntologySeries)
+        if oseries:
+            out["ontology_series"] = self.decode_ontologies(oseries)
+
+        return out
+
+    def decode_uas_packet(self, pkt):
+        out = {
+            "type": "ST0601_UAS",
+            "fields": self.decode_fields(pkt)
+        }
+
+        raw_vmti = pkt.getField(self.UasDatalinkTag.VmtiLocalDataSet)
+
+        if isinstance(raw_vmti, self.NestedVmtiLocalSet):
+            vmti = raw_vmti.getVmti()
+            vmti_out = {"fields": self.decode_fields(vmti)}
+
+            vseries = vmti.getField(self.VmtiMetadataKey.VTargetSeries)
             if vseries:
-                vmti_out["vtarget_series"] = decode_vtargets(vseries)
+                vmti_out["vtarget_series"] = self.decode_vtargets(vseries)
 
-            aseries = vmti.getField(VmtiMetadataKey.AlgorithmSeries)
+            aseries = vmti.getField(self.VmtiMetadataKey.AlgorithmSeries)
             if aseries:
-                vmti_out["algorithm_series"] = decode_algorithms(aseries)
+                vmti_out["algorithm_series"] = self.decode_algorithms(aseries)
 
-            oseries = vmti.getField(VmtiMetadataKey.OntologySeries)
+            oseries = vmti.getField(self.VmtiMetadataKey.OntologySeries)
             if oseries:
-                vmti_out["ontology_series"] = decode_ontologies(oseries)
+                vmti_out["ontology_series"] = self.decode_ontologies(oseries)
 
-            pkt_out["embedded_vmti"] = vmti_out
+            out["embedded_vmti"] = vmti_out
 
-    else:
-        pkt_out["type"] = "UNKNOWN"
-        pkt_out["raw"] = str(pkt)
+        return out
 
-    result["packets"].append(pkt_out)
+    # ---------------- Main API ----------------
+    def decode_file(self, klv_path):
+        data = open(klv_path, "rb").read()
+        byte_array = jpype.JArray(JByte)(data)
+        packets = self.KlvParser.parseBytes(byte_array)
 
-# -------------------------------------------------
-# Write JSON
-# -------------------------------------------------
-# with open("output/embedded_decoded.json", "w") as f:
-#     json.dump(result, f, indent=2)
-with open("output/standalone_decoded.json", "w") as f:
-    json.dump(result, f, indent=2)
+        result = {
+            "total_packets": packets.size(),
+            "packets": []
+        }
 
-jpype.shutdownJVM()
+        for i in range(packets.size()):
+            pkt = packets.get(i)
+            pkt_out = {"packet_index": i}
 
-print("✔ JSON output saved to decoded_output.json")
+            if isinstance(pkt, self.VmtiLocalSet):
+                pkt_out.update(self.decode_vmti_packet(pkt))
+
+            elif isinstance(pkt, self.UasDatalinkMessage):
+                pkt_out.update(self.decode_uas_packet(pkt))
+
+            else:
+                pkt_out["type"] = "UNKNOWN"
+                pkt_out["raw"] = str(pkt)
+
+            result["packets"].append(pkt_out)
+
+        return result
