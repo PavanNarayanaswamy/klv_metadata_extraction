@@ -32,7 +32,7 @@
 # if __name__ == "__main__":
 #     main()
 
-from pipeline import klv_metadata_pipeline
+from pipeline import isr_pipeline
 
 JARS = [
     "jars/jmisb-api-1.12.0.jar",
@@ -41,9 +41,12 @@ JARS = [
     "jars/slf4j-simple-1.7.36.jar",
 ]
 if __name__ == "__main__":
-    klv_metadata_pipeline(
+    isr_pipeline(
         ts_path="embedded.ts",
         jars=JARS,
         output_dir="output",
+        rtsp_url="rtsp://localhost:8554/live",
+        output_path="output/output_rfdetr_tracking_rtsp.mp4",
+        confidence_threshold=0.4
     )
 

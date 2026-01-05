@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from decode import JmisbDecoder
 import mlflow
-
+from global_tracking import ObjectTracker
 
 @step(experiment_tracker="mlflow_experiment_tracker")
 def extract_metadata_step(
@@ -22,7 +22,7 @@ def extract_metadata_step(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     
-    klv_path = output_dir / "metadata_emb.klv"
+    klv_path = output_dir / "metadata.klv"
     cmd = [
         "ffmpeg",
         "-y",
@@ -63,3 +63,20 @@ def decode_metadata_step(
     mlflow.log_artifact(str(output_json), artifact_path="decoded_klv")
 
     return str(output_json)
+
+
+@step(enable_cache=False,experiment_tracker="mlflow_experiment_tracker")
+def object_detection(rtsp_url: str, output_path: str, confidence_threshold: float,) -> None:
+    """
+    Run the full RTSP tracking job.
+    Live resources must stay inside ONE step.
+    """
+    tracker = ObjectTracker(
+        rtsp_url=rtsp_url,
+        output_path=output_path,
+        confidence_threshold=confidence_threshold,
+    )
+    tracker.load_model()
+    tracker.setup_stream()
+    tracker.setup_tracking()
+    tracker.run()
